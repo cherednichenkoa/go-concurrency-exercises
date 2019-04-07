@@ -8,10 +8,16 @@
 
 package main
 
-import "container/list"
+import (
+	"container/list"
+	"sync"
+)
 
 // CacheSize determines how big the cache can grow
 const CacheSize = 100
+
+var cacheMutex = sync.RWMutex{}
+
 
 // KeyStoreCacheLoader is an interface for the KeyStoreCache
 type KeyStoreCacheLoader interface {
@@ -36,10 +42,14 @@ func New(load KeyStoreCacheLoader) *KeyStoreCache {
 
 // Get gets the key from cache, loads it from the source if needed
 func (k *KeyStoreCache) Get(key string) string {
+	cacheMutex.RLock()
 	val, ok := k.cache[key]
+	cacheMutex.RLock()
 
 	// Miss - load from database and save it in cache
 	if !ok {
+		cacheMutex.Lock()
+		defer cacheMutex.Unlock()
 		val = k.load(key)
 		k.cache[key] = val
 		k.pages.PushFront(key)
@@ -50,7 +60,6 @@ func (k *KeyStoreCache) Get(key string) string {
 			k.pages.Remove(k.pages.Back())
 		}
 	}
-
 	return val
 }
 
