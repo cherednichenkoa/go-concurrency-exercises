@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	timeLimit = 10 * time.Second
+	maxSeconds = 10
 )
 
 // User defines the UserModel. Use this to check whether a User is a
@@ -26,23 +26,74 @@ type User struct {
 	TimeUsed  int64 // in seconds
 }
 
+type UserStrategy interface {
+	Process(process func()) bool
+}
+
+type PremiumUserFlow struct {
+	User *User
+}
+
+func (pu PremiumUserFlow) Process (process func()) bool {
+	process()
+	return true
+}
+
+type FreeUserFlow struct {
+	User *User
+}
+
+
+func (fu FreeUserFlow) Process (process func()) bool {
+	timeLeft := fu.getTimeLeft()
+	limiter := time.Tick(time.Duration(timeLeft) * time.Second)
+	start := time.Now()
+	defer fu.updateUsageTime(start)
+	done := make(chan bool)
+	go func(done chan bool) {
+		// by default time.sleep can not be interrupted
+		// so we have to put it into the separate goroutine so
+		// ticker can work in current routine
+		process()
+		done <- true
+	}(done)
+	select {
+	case <- limiter :
+
+		return false
+	case <- done:
+		return true
+	}
+}
+
+
+func (fu FreeUserFlow) updateUsageTime(start time.Time)  {
+		t := time.Now()
+		secondsConsumed := int64(t.Sub(start).Seconds())
+		fu.User.TimeUsed += secondsConsumed
+}
+
+
+func (fu FreeUserFlow) getTimeLeft() int64 {
+	timeLeft := maxSeconds - fu.User.TimeUsed
+	if timeLeft < 0 {
+		timeLeft = 0
+	}
+	return timeLeft
+}
+
 // HandleRequest runs the processes requested by users. Returns false
 // if process had to be killed
 func HandleRequest(process func(), u *User) bool {
-	limiter := time.Tick(timeLimit)
-	done := make(chan bool)
-	go func(done chan bool) {
-		process()
-		done <- true
+	strategy := GetUserStrategy(u)
+	return strategy.Process(process)
+}
 
-	}(done)
-
-	select {
-		case <- limiter :
-			return false
-		case <- done:
-			return true
+func GetUserStrategy(u *User) UserStrategy  {
+	if u.IsPremium {
+		return PremiumUserFlow{User: u}
 	}
+	return FreeUserFlow{User: u}
 }
 
 func main() {
