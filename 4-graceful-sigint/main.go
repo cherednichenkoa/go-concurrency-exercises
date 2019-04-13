@@ -13,10 +13,33 @@
 
 package main
 
-func main() {
-	// Create a process
-	proc := MockProcess{}
+import (
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+)
 
-	// Run the process (blocking)
-	proc.Run()
+func main() {
+	var wg sync.WaitGroup
+
+	sigs := make(chan os.Signal, 1)
+	proc := MockProcess{}
+	signal.Notify(sigs, syscall.SIGINT)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		// Create a process
+		// Run the process (blocking)
+		proc.Run()
+	}()
+
+	select {
+		case <- sigs:
+			proc.Stop()
+	}
+	// wait until all routines are finished
+	wg.Wait()
+
 }
