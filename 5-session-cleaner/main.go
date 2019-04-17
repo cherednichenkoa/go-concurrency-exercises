@@ -20,6 +20,11 @@ package main
 import (
 	"errors"
 	"log"
+	"time"
+)
+
+const (
+	sessionLifetime = 5
 )
 
 // SessionManager keeps track of all sessions from creation, updating
@@ -31,6 +36,7 @@ type SessionManager struct {
 // Session stores the session's data
 type Session struct {
 	Data map[string]interface{}
+	TimeUpdated time.Time
 }
 
 // NewSessionManager creates a new sessionManager
@@ -38,6 +44,7 @@ func NewSessionManager() *SessionManager {
 	m := &SessionManager{
 		sessions: make(map[string]Session),
 	}
+	go StartSessionCleaner(m)
 
 	return m
 }
@@ -48,9 +55,11 @@ func (m *SessionManager) CreateSession() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	timeCreated := time.Now()
 
 	m.sessions[sessionID] = Session{
 		Data: make(map[string]interface{}),
+		TimeUpdated: timeCreated,
 	}
 
 	return sessionID, nil
@@ -70,22 +79,29 @@ func (m *SessionManager) GetSessionData(sessionID string) (map[string]interface{
 	return session.Data, nil
 }
 
+func (m *SessionManager) RemoveSession(sessionID string)  error {
+	delete(m.sessions, sessionID)
+	return nil
+}
+
 // UpdateSessionData overwrites the old session data with the new one
 func (m *SessionManager) UpdateSessionData(sessionID string, data map[string]interface{}) error {
 	_, ok := m.sessions[sessionID]
 	if !ok {
 		return ErrSessionNotFound
 	}
-
+	timeCreated := time.Now()
 	// Hint: you should renew expiry of the session here
 	m.sessions[sessionID] = Session{
 		Data: data,
+		TimeUpdated: timeCreated,
 	}
 
 	return nil
 }
 
 func main() {
+
 	// Create new sessionManager and new session
 	m := NewSessionManager()
 	sID, err := m.CreateSession()
@@ -113,4 +129,26 @@ func main() {
 	}
 
 	log.Println("Get session data:", updatedData)
+}
+
+func StartSessionCleaner(manager *SessionManager){
+	limiter := time.Tick(sessionLifetime * time.Second)
+	for {
+		select {
+			case <- limiter :
+				for sessionId, session := range(manager.sessions) {
+					expired := time.Now().Sub(session.TimeUpdated).Seconds() >= sessionLifetime
+					if expired {
+						CleanUpSession(manager,sessionId)
+					}
+				}
+			}
+	}
+}
+
+func CleanUpSession(manager *SessionManager, sessionId string) {
+	err := manager.RemoveSession(sessionId)
+	if err != nil {
+		panic("There was an error during session cleanup")
+	}
 }
